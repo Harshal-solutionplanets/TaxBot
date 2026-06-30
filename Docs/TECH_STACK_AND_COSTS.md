@@ -123,7 +123,7 @@ _Switch from local Ollama to the **Gemini API Free Tier** for the LLM and embedd
 | LLM + Embeddings | **Google Gemini API**         | 1,500 req/day, 15 req/min, 1.5M tokens/day | **$0.00/month** |
 | Vector Database  | **Pinecone Serverless**       | 2GB storage, starter queries included      | **$0.00/month** |
 | Backend Hosting  | **Render.com**                | Free Web Service (sleeps after 15min idle) | **$0.00/month** |
-| Frontend Hosting | **Streamlit Community Cloud** | Unlimited public apps                      | **$0.00/month** |
+| Frontend Hosting | **Hugging Face Spaces** _(recommended)_ | Always-on, custom domain, native Streamlit | **$0.00/month** |
 | **Total**        |                               |                                            | **$0.00/month** |
 
 > **Limitation:** Gemini free tier has rate limits. For a CA firm with many simultaneous users, you may hit 15 requests/minute cap.
@@ -186,6 +186,68 @@ _Run the entire local stack (Ollama + FastAPI + Streamlit) on a cloud virtual ma
 
 ---
 
+## 🌐 Free Streamlit Frontend Hosting Options
+
+> **Note:** Streamlit apps are Python-server applications and **cannot** be deployed on Vercel or Netlify (which are JavaScript-only). The platforms below all support Streamlit natively, without any code changes.
+
+### Platform Comparison
+
+| Platform | Free URL Format | Custom Domain | Always-On | Streamlit Support | Difficulty |
+| -------- | --------------- | ------------- | --------- | ----------------- | ---------- |
+| **Hugging Face Spaces** ⭐ | `hf.space/username/taxbot` | ✅ Free (CNAME) | ✅ Yes | Native (no Docker) | Easy |
+| **Streamlit Community Cloud** | `taxbot-ca.streamlit.app` | ❌ `.streamlit.app` only | ✅ Yes | Native (no Docker) | Easiest |
+| **Render.com** | `taxbot.onrender.com` | ✅ Free | ⚠️ Sleeps (15min) | Python Web Service | Easy |
+| **Koyeb.com** | `taxbot.koyeb.app` | ✅ Free | ✅ Yes | Needs Dockerfile | Medium |
+
+---
+
+### ⭐ Recommended: Hugging Face Spaces
+
+**Why it's the best choice:**
+- Native Streamlit support — no Docker or config files needed
+- Always-on free tier (no sleep/cold start)
+- Supports **custom domain** (e.g., `taxbot.solutionplanets.com`) via free CNAME in Cloudflare
+- Deployment URL is clean: `huggingface.co/spaces/harshal-sp/taxbot`
+- Secrets management built-in (add `PINECONE_API_KEY`, `BACKEND_URL` in Space settings)
+
+**Quick Deploy Steps:**
+1. Go to [huggingface.co/new-space](https://huggingface.co/new-space)
+2. Select **Streamlit** as the SDK
+3. Link GitHub repo → `Harshal-solutionplanets/TaxBot`
+4. Set app file path to `frontend/app.py`
+5. Add secrets in Space Settings → Secrets tab
+6. Optionally: Settings → Custom domains → add your own domain
+
+---
+
+### Streamlit Community Cloud: Clean URL Tip
+
+Streamlit Community Cloud generates a random slug by default (e.g., `taxbot-trxjgml8vnv5ygpxdswey.streamlit.app`). You can override this with a clean name in the **App URL** field before deploying:
+
+```
+taxbot-ca.streamlit.app
+```
+
+This is free but does **not** support pointing your own domain name to it.
+
+---
+
+### Koyeb Dockerfile (If you choose Koyeb)
+
+Create `frontend/Dockerfile`:
+
+```dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+COPY . .
+EXPOSE 8501
+CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+```
+
+---
+
 ## 📊 Cost Comparison Summary
 
 | Option                         | Cost/Month | LLM Type                | GPU Required     | Production-Ready |
@@ -200,7 +262,7 @@ _Run the entire local stack (Ollama + FastAPI + Streamlit) on a cloud virtual ma
 
 ## 🚀 Recommended Deployment Path
 
-1. **Start with Option 1** (Gemini API + Render + Streamlit Cloud) — zero cost, zero configuration, live in under 30 minutes.
+1. **Start with Option 1** (Gemini API + Render backend + **Hugging Face Spaces** frontend) — zero cost, always-on, custom domain support, live in under 30 minutes.
 2. **Monitor usage** — if you hit Gemini free tier limits (which only happens with heavy concurrent usage), upgrade to **Option 2** (Groq) which is also free but faster.
 3. **Scale up** to **Option 3 or 4** only when the application is being used by 10+ CAs simultaneously.
 
