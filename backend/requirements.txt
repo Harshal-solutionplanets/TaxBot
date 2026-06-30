@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+pydantic
+python-dotenv
+requests
+pinecone
+pinecone-text
+pymupdf
+python-pptx
+google-generativeai
+moviepy
+rank-bm25
+numpy

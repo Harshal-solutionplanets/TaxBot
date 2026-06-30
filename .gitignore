@@ -1,0 +1,28 @@
+# Environments
+venv/
+.venv/
+env/
+
+# API keys & secrets
+.env
+.env.*
+
+# Large data corpus files
+backend/data/
+backend/data/*
+
+# Local search models & caches
+backend/bm25_model.json
+**/__pycache__/
+*.pyc
+
+# Local log files
+*.log
+backend/*.log
+frontend/*.log
+
+# IDE & system configs
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
