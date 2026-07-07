@@ -15,6 +15,7 @@ export default function AdminPanel() {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const fileInputRef = useRef(null);
   const logsEndRef = useRef(null);
+  const ingestStartTime = useRef(null);
 
   // Fetch file list
   const fetchFiles = () => {
@@ -127,6 +128,7 @@ export default function AdminPanel() {
     setProgressPercent(0);
     setProgressMessage('Starting ingestion pipeline...');
     setLogs([]);
+    ingestStartTime.current = Date.now();
 
     try {
       const response = await fetch(`${API_URL}/api/admin/ingest`, { method: 'POST' });
@@ -356,6 +358,30 @@ export default function AdminPanel() {
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: '8px' }}>
                 {progressMessage}
               </p>
+              {ingesting && progressPercent > 0 && progressPercent < 100 && (() => {
+                const elapsed = (Date.now() - (ingestStartTime.current || Date.now())) / 1000;
+                const totalEstimate = elapsed / (progressPercent / 100);
+                const remaining = Math.max(0, Math.round(totalEstimate - elapsed));
+                const mins = Math.floor(remaining / 60);
+                const secs = remaining % 60;
+                return (
+                  <p style={{ color: 'var(--accent-color)', fontSize: '0.85rem', fontWeight: '500', marginTop: '4px' }}>
+                    ⏱️ Estimated time remaining: {mins > 0 ? `${mins}m ` : ''}{secs}s
+                  </p>
+                );
+              })()}
+              {ingesting && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px',
+                  padding: '10px 14px', borderRadius: '8px',
+                  backgroundColor: '#fef3c7', border: '1px solid #f59e0b'
+                }}>
+                  <span style={{ fontSize: '1.1rem' }}>⚠️</span>
+                  <span style={{ fontSize: '0.85rem', color: '#92400e', fontWeight: '500' }}>
+                    Please do not close this tab or browser while ingestion is in progress.
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
