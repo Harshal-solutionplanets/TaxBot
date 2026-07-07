@@ -461,7 +461,7 @@ class FollowupsRequest(BaseModel):
 @app.post("/api/query/suggest-followups")
 def suggest_followups(request: FollowupsRequest):
     if not GEMINI_API_KEY:
-        return ["What is Section 44AD?", "Explain corporate tax rates.", "How is depreciation computed?"]
+        return []
         
     try:
         history_str = ""
@@ -484,7 +484,7 @@ def suggest_followups(request: FollowupsRequest):
     except Exception as e:
         print(f"[WARNING] Failed to generate smart followups: {e}")
         
-    return ["What is Section 44AD?", "Explain corporate tax rates.", "How is depreciation computed?"]
+    return []
 
 class FeedbackRequest(BaseModel):
     feedback: str  # 'up', 'down', or 'none'
@@ -498,27 +498,239 @@ def log_message_feedback(message_id: str, request: FeedbackRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/upload")
-async def upload_document(file: UploadFile = File(...)):
+# --- Admin Panel Endpoints ---
+
+@app.get("/api/admin/files")
+def list_data_files():
+    """Returns a list of all files in the data directory with metadata."""
     data_dir = "./data"
     os.makedirs(data_dir, exist_ok=True)
-    file_path = os.path.join(data_dir, file.filename)
-    try:
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        return {"status": "success", "filename": file.filename}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"File save failed: {str(e)}")
+    
+    files = []
+    supported_ext = {".pdf", ".pptx", ".ppt", ".vtt"}
+    for filename in os.listdir(data_dir):
+        file_path = os.path.join(data_dir, filename)
+        if os.path.isfile(file_path):
+            ext = os.path.splitext(filename)[1].lower()
+            if ext not in supported_ext:
+                continue
+            stat = os.stat(file_path)
+            from datetime import datetime
+            files.append({
+                "filename": filename,
+                "size_mb": round(stat.st_size / (1024 * 1024), 2),
+                "type": ext.replace(".", "").upper(),
+                "uploaded_at": datetime.fromtimestamp(stat.st_mtime).isoformat()
+            })
+    
+    # Sort by upload time descending
+    files.sort(key=lambda x: x["uploaded_at"], reverse=True)
+    return files
 
-@app.post("/api/ingest")
-async def trigger_ingestion():
+@app.post("/api/admin/upload")
+async def admin_upload_files(files: list[UploadFile] = File(...)):
+    """Upload one or more files to the data directory."""
+    data_dir = "./data"
+    os.makedirs(data_dir, exist_ok=True)
+    
+    uploaded = []
+    errors = []
+    supported_ext = {".pdf", ".pptx", ".ppt", ".vtt"}
+    
+    for file in files:
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext not in supported_ext:
+            errors.append(f"Unsupported file type: {file.filename} ({ext})")
+            continue
+            
+        file_path = os.path.join(data_dir, file.filename)
+        try:
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            uploaded.append(file.filename)
+        except Exception as e:
+            errors.append(f"Failed to save {file.filename}: {str(e)}")
+    
+    return {
+        "status": "success" if uploaded else "error",
+        "uploaded": uploaded,
+        "errors": errors
+    }
+
+@app.delete("/api/admin/files/{filename}")
+def admin_delete_file(filename: str):
+    """Delete a file from the data directory."""
+    file_path = os.path.join("./data", filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail=f"File '{filename}' not found.")
     try:
-        from ingestion import DocumentIngestionPipeline
-        pipeline = DocumentIngestionPipeline()
-        pipeline.process_all_files()
-        return {"status": "success", "message": "All documents ingested successfully."}
+        os.remove(file_path)
+        return {"status": "success", "message": f"Deleted '{filename}'"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/admin/ingest")
+async def admin_trigger_ingestion():
+    """
+    Runs the full ingestion pipeline and streams progress updates via SSE.
+    Each line is a JSON object with event type and data.
+    """
+    import threading
+    import queue
+    import time
+    
+    progress_queue = queue.Queue()
+    
+    def run_ingestion():
+        try:
+            from ingestion import DocumentIngestionPipeline
+            
+            progress_queue.put(json.dumps({"event": "progress", "step": "init", "message": "Initializing ingestion pipeline...", "percent": 5}))
+            pipeline = DocumentIngestionPipeline()
+            
+            # --- Phase 1: Parse files ---
+            progress_queue.put(json.dumps({"event": "progress", "step": "parse", "message": "Scanning data directory...", "percent": 10}))
+            
+            data_dir = "./data"
+            all_files = [f for f in os.listdir(data_dir) if os.path.isfile(os.path.join(data_dir, f))]
+            supported_files = [f for f in all_files if os.path.splitext(f)[1].lower() in {".pdf", ".pptx", ".ppt", ".vtt"}]
+            total_files = len(supported_files)
+            
+            if total_files == 0:
+                progress_queue.put(json.dumps({"event": "error", "message": "No supported files found in data directory."}))
+                progress_queue.put(None)
+                return
+            
+            progress_queue.put(json.dumps({"event": "progress", "step": "parse", "message": f"Found {total_files} files to process...", "percent": 15}))
+            
+            # Parse all files
+            all_raw_chunks = []
+            vtt_bases = set()
+            
+            for i, filename in enumerate(supported_files):
+                file_path = os.path.join(data_dir, filename)
+                ext = os.path.splitext(filename)[1].lower()
+                file_percent = 15 + int((i / total_files) * 25)
+                progress_queue.put(json.dumps({"event": "progress", "step": "parse", "message": f"Parsing: {filename}", "percent": file_percent}))
+                
+                if ext == ".pdf":
+                    all_raw_chunks.extend(pipeline.parse_pdf(file_path))
+                elif ext in [".pptx", ".ppt"]:
+                    all_raw_chunks.extend(pipeline.parse_ppt(file_path))
+                elif ext == ".vtt":
+                    vtt_bases.add(filename.split(".")[0])
+                    all_raw_chunks.extend(pipeline.parse_vtt(file_path))
+            
+            if not all_raw_chunks:
+                progress_queue.put(json.dumps({"event": "error", "message": "No text content extracted from files."}))
+                progress_queue.put(None)
+                return
+            
+            # --- Phase 2: Chunk ---
+            progress_queue.put(json.dumps({"event": "progress", "step": "chunk", "message": f"Splitting {len(all_raw_chunks)} pages into embedding chunks...", "percent": 42}))
+            refined_chunks = pipeline.split_into_embeddings_chunks(all_raw_chunks)
+            total_chunks = len(refined_chunks)
+            progress_queue.put(json.dumps({"event": "progress", "step": "chunk", "message": f"Generated {total_chunks} chunks.", "percent": 48}))
+            
+            # --- Phase 3: BM25 ---
+            progress_queue.put(json.dumps({"event": "progress", "step": "bm25", "message": "Training BM25 keyword model...", "percent": 52}))
+            corpus_texts = [c["text"] for c in refined_chunks]
+            pipeline.fit_bm25(corpus_texts)
+            progress_queue.put(json.dumps({"event": "progress", "step": "bm25", "message": "BM25 model trained and saved.", "percent": 58}))
+            
+            # --- Phase 4: Pinecone ---
+            progress_queue.put(json.dumps({"event": "progress", "step": "pinecone", "message": "Connecting to Pinecone...", "percent": 60}))
+            if not pipeline.init_pinecone_index():
+                progress_queue.put(json.dumps({"event": "error", "message": "Failed to connect to Pinecone. Check API key."}))
+                progress_queue.put(None)
+                return
+            
+            # --- Phase 5: Embed + Upload ---
+            progress_queue.put(json.dumps({"event": "progress", "step": "upload", "message": f"Embedding and uploading {total_chunks} chunks to Pinecone...", "percent": 62}))
+            
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            import re as re_mod
+            
+            vectors_to_upsert = []
+            completed_count = 0
+            
+            def worker(idx, chunk):
+                text = chunk["text"]
+                metadata = chunk["metadata"]
+                if not text.strip():
+                    return None
+                metadata["text"] = text
+                try:
+                    dense_vector = pipeline.get_dense_embedding(text)
+                    sparse_vector = pipeline.get_sparse_embedding(text)
+                    chunk_id = f"chunk_{metadata['source']}_{idx}"
+                    chunk_id = re_mod.sub(r'[^a-zA-Z0-9_\-\.#]', '_', chunk_id)
+                    vector_data = {
+                        "id": chunk_id,
+                        "values": dense_vector,
+                        "metadata": metadata
+                    }
+                    if sparse_vector.get("indices") and sparse_vector.get("values"):
+                        vector_data["sparse_values"] = sparse_vector
+                    return vector_data
+                except Exception as e:
+                    return None
+            
+            with ThreadPoolExecutor(max_workers=16) as executor:
+                futures = {executor.submit(worker, idx, chunk): idx for idx, chunk in enumerate(refined_chunks)}
+                for future in as_completed(futures):
+                    vector_data = future.result()
+                    completed_count += 1
+                    
+                    if completed_count % 20 == 0 or completed_count == total_chunks:
+                        upload_percent = 62 + int((completed_count / total_chunks) * 33)
+                        progress_queue.put(json.dumps({
+                            "event": "progress",
+                            "step": "upload",
+                            "message": f"Processed {completed_count}/{total_chunks} chunks...",
+                            "percent": min(upload_percent, 95)
+                        }))
+                    
+                    if vector_data:
+                        vectors_to_upsert.append(vector_data)
+                        if len(vectors_to_upsert) >= 50:
+                            try:
+                                pipeline.index.upsert(vectors=vectors_to_upsert)
+                            except Exception as e:
+                                progress_queue.put(json.dumps({"event": "warning", "message": f"Batch upload error: {e}"}))
+                            vectors_to_upsert = []
+            
+            # Final batch
+            if vectors_to_upsert:
+                try:
+                    pipeline.index.upsert(vectors=vectors_to_upsert)
+                except Exception as e:
+                    progress_queue.put(json.dumps({"event": "warning", "message": f"Final batch error: {e}"}))
+            
+            progress_queue.put(json.dumps({
+                "event": "complete",
+                "message": f"Ingestion complete! {total_chunks} chunks from {total_files} files uploaded to Pinecone.",
+                "percent": 100
+            }))
+            
+        except Exception as e:
+            progress_queue.put(json.dumps({"event": "error", "message": f"Ingestion failed: {str(e)}"}))
+        finally:
+            progress_queue.put(None)  # Signal end of stream
+    
+    def progress_generator():
+        # Start ingestion in a background thread
+        thread = threading.Thread(target=run_ingestion, daemon=True)
+        thread.start()
+        
+        while True:
+            item = progress_queue.get()
+            if item is None:
+                break
+            yield item + "\n"
+    
+    return StreamingResponse(progress_generator(), media_type="text/event-stream")
+
 
 if __name__ == "__main__":
     import uvicorn
