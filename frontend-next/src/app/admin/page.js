@@ -48,14 +48,31 @@ export default function AdminPanel() {
 
   // Handle file selection
   const handleFileChange = (e) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length > 5) {
-      setUploadResult({ status: 'error', errors: ['You can only select a maximum of 5 documents at once.'] });
-      setSelectedFiles(files.slice(0, 5));
-    } else {
-      setUploadResult(null);
-      setSelectedFiles(files);
-    }
+    const newFiles = Array.from(e.target.files || []);
+    if (newFiles.length === 0) return;
+
+    setSelectedFiles(prev => {
+      const combined = [...prev];
+      const existingNames = new Set(prev.map(f => f.name));
+      
+      for (const file of newFiles) {
+        if (!existingNames.has(file.name)) {
+          combined.push(file);
+          existingNames.add(file.name);
+        }
+      }
+
+      if (combined.length > 5) {
+        setUploadResult({ status: 'error', errors: ['You can only select a maximum of 5 documents total.'] });
+        return combined.slice(0, 5);
+      } else {
+        setUploadResult(null);
+        return combined;
+      }
+    });
+
+    // Reset the input so that selecting the same file after removal works, and we rely entirely on `selectedFiles` state.
+    if (e.target) e.target.value = '';
   };
 
   // Upload files
