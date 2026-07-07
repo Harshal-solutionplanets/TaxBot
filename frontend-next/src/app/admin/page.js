@@ -31,10 +31,29 @@ export default function AdminPanel() {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
 
+  // Handle browser close during ingestion
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (ingesting) {
+        e.preventDefault();
+        e.returnValue = 'Are you sure? Ingestion will be discarded';
+        return 'Are you sure? Ingestion will be discarded';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [ingesting]);
+
   // Upload files
   const handleUpload = async () => {
     const input = fileInputRef.current;
     if (!input || !input.files || input.files.length === 0) return;
+
+    if (input.files.length > 5) {
+      setUploadResult({ status: 'error', errors: ['You can only upload a maximum of 5 documents at once.'] });
+      return;
+    }
 
     setUploading(true);
     setUploadResult(null);
@@ -136,7 +155,6 @@ export default function AdminPanel() {
             <h1 style={{ margin: 0, fontSize: '1.8rem' }}>🔧 TaxBot Admin Panel</h1>
             <p style={{ color: 'var(--text-secondary)', marginTop: '5px' }}>Manage knowledge base documents and trigger ingestion</p>
           </div>
-          <a href="/" style={{ color: 'var(--accent-color)', textDecoration: 'none' }}>← Back to Chat</a>
         </div>
 
         {/* Upload Section */}
