@@ -12,6 +12,7 @@ export default function AdminPanel() {
   const [progressMessage, setProgressMessage] = useState('');
   const [logs, setLogs] = useState([]);
   const [uploadResult, setUploadResult] = useState(null);
+  const [selectedFiles, setSelectedFiles] = useState([]);
   const fileInputRef = useRef(null);
   const logsEndRef = useRef(null);
 
@@ -45,12 +46,23 @@ export default function AdminPanel() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [ingesting]);
 
+  // Handle file selection
+  const handleFileChange = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length > 5) {
+      setUploadResult({ status: 'error', errors: ['You can only select a maximum of 5 documents at once.'] });
+      setSelectedFiles(files.slice(0, 5));
+    } else {
+      setUploadResult(null);
+      setSelectedFiles(files);
+    }
+  };
+
   // Upload files
   const handleUpload = async () => {
-    const input = fileInputRef.current;
-    if (!input || !input.files || input.files.length === 0) return;
+    if (selectedFiles.length === 0) return;
 
-    if (input.files.length > 5) {
+    if (selectedFiles.length > 5) {
       setUploadResult({ status: 'error', errors: ['You can only upload a maximum of 5 documents at once.'] });
       return;
     }
@@ -59,7 +71,7 @@ export default function AdminPanel() {
     setUploadResult(null);
 
     const formData = new FormData();
-    for (const file of input.files) {
+    for (const file of selectedFiles) {
       formData.append('files', file);
     }
 
@@ -71,7 +83,8 @@ export default function AdminPanel() {
       const data = await res.json();
       setUploadResult(data);
       fetchFiles();
-      input.value = '';
+      setSelectedFiles([]);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err) {
       setUploadResult({ status: 'error', errors: ['Network error: ' + err.message] });
     } finally {
@@ -175,6 +188,7 @@ export default function AdminPanel() {
               ref={fileInputRef}
               multiple
               accept=".pdf,.pptx,.ppt,.vtt"
+              onChange={handleFileChange}
               style={{
                 flex: 1,
                 padding: '10px',
@@ -187,7 +201,7 @@ export default function AdminPanel() {
             />
             <button
               onClick={handleUpload}
-              disabled={uploading}
+              disabled={uploading || selectedFiles.length === 0}
               style={{
                 padding: '10px 24px',
                 borderRadius: '8px',
@@ -195,13 +209,66 @@ export default function AdminPanel() {
                 backgroundColor: 'var(--accent-color)',
                 color: 'white',
                 fontWeight: '600',
-                cursor: uploading ? 'not-allowed' : 'pointer',
-                opacity: uploading ? 0.6 : 1
+                cursor: (uploading || selectedFiles.length === 0) ? 'not-allowed' : 'pointer',
+                opacity: (uploading || selectedFiles.length === 0) ? 0.6 : 1
               }}
             >
               {uploading ? 'Uploading...' : 'Upload Files'}
             </button>
           </div>
+
+          {/* Thumbnail Preview */}
+          {selectedFiles.length > 0 && (
+            <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', marginTop: '20px' }}>
+              {selectedFiles.map((f, i) => {
+                const ext = f.name.split('.').pop()?.toUpperCase() || '';
+                const isPDF = ext === 'PDF';
+                const isVTT = ext === 'VTT';
+                return (
+                  <div key={i} style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '16px',
+                    border: '1px solid var(--border-color)', borderRadius: '12px', width: '130px',
+                    backgroundColor: 'var(--bg-color)', boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
+                    position: 'relative'
+                  }}>
+                    <button 
+                      onClick={() => {
+                        const newFiles = [...selectedFiles];
+                        newFiles.splice(i, 1);
+                        setSelectedFiles(newFiles);
+                        // Clear input if all files removed so the user can select the same file again if they want
+                        if (newFiles.length === 0 && fileInputRef.current) fileInputRef.current.value = '';
+                      }}
+                      style={{
+                        position: 'absolute', top: '-8px', right: '-8px', background: 'var(--error)', 
+                        color: 'white', border: 'none', borderRadius: '50%', width: '22px', height: '22px', 
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                        fontSize: '0.8rem', boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                      }}
+                      title="Remove"
+                    >
+                      ✕
+                    </button>
+                    <div style={{
+                      fontSize: '2.5rem', marginBottom: '8px',
+                      color: isPDF ? '#ef4444' : isVTT ? '#10b981' : '#f59e0b'
+                    }}>
+                      {isPDF ? '📄' : isVTT ? '💬' : '📊'}
+                    </div>
+                    <div style={{
+                      fontSize: '0.8rem', textAlign: 'center', wordBreak: 'break-all', fontWeight: '500',
+                      display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden'
+                    }} title={f.name}>
+                      {f.name}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: '6px' }}>
+                      {(f.size / 1024 / 1024).toFixed(2)} MB
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {uploadResult && (
             <div style={{ marginTop: '12px', fontSize: '0.9rem' }}>
               {uploadResult.uploaded?.length > 0 && (
