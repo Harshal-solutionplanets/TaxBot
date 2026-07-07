@@ -13,6 +13,10 @@ export default function AdminPanel() {
   const [logs, setLogs] = useState([]);
   const [uploadResult, setUploadResult] = useState(null);
   const [selectedFiles, setSelectedFiles] = useState([]);
+  const [chatSessions, setChatSessions] = useState([]);
+  const [selectedSession, setSelectedSession] = useState(null);
+  const [sessionMessages, setSessionMessages] = useState([]);
+  const [loadingMessages, setLoadingMessages] = useState(false);
   const fileInputRef = useRef(null);
   const logsEndRef = useRef(null);
   const ingestStartTime = useRef(null);
@@ -25,8 +29,17 @@ export default function AdminPanel() {
       .catch(err => console.error("Failed to fetch files", err));
   };
 
+  // Fetch chat sessions
+  const fetchChatSessions = () => {
+    fetch(`${API_URL}/api/admin/chat-sessions`)
+      .then(res => res.json())
+      .then(data => setChatSessions(data))
+      .catch(err => console.error("Failed to fetch chat sessions", err));
+  };
+
   useEffect(() => {
     fetchFiles();
+    fetchChatSessions();
   }, []);
 
   useEffect(() => {
@@ -480,6 +493,152 @@ export default function AdminPanel() {
             </table>
           )}
         </div>
+
+        {/* Chat Data Section */}
+        <div style={{
+          backgroundColor: 'var(--sidebar-bg)',
+          borderRadius: '12px',
+          padding: '24px',
+          border: '1px solid var(--border-color)',
+          marginTop: '24px'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <h2 style={{ margin: 0, fontSize: '1.2rem' }}>
+              💬 Chat Data ({chatSessions.length} sessions)
+            </h2>
+            <button
+              onClick={fetchChatSessions}
+              style={{
+                padding: '6px 16px', borderRadius: '6px', border: '1px solid var(--border-color)',
+                backgroundColor: 'var(--bg-color)', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '0.85rem'
+              }}
+            >
+              🔄 Refresh
+            </button>
+          </div>
+
+          {chatSessions.length === 0 ? (
+            <p style={{ color: 'var(--text-secondary)' }}>No chat sessions found in the database.</p>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid var(--border-color)', textAlign: 'left' }}>
+                  <th style={{ padding: '10px 8px', color: 'var(--text-secondary)', fontWeight: '500', fontSize: '0.85rem' }}>User ID</th>
+                  <th style={{ padding: '10px 8px', color: 'var(--text-secondary)', fontWeight: '500', fontSize: '0.85rem' }}>Session Title</th>
+                  <th style={{ padding: '10px 8px', color: 'var(--text-secondary)', fontWeight: '500', fontSize: '0.85rem' }}>Messages</th>
+                  <th style={{ padding: '10px 8px', color: 'var(--text-secondary)', fontWeight: '500', fontSize: '0.85rem' }}>Created</th>
+                  <th style={{ padding: '10px 8px', color: 'var(--text-secondary)', fontWeight: '500', fontSize: '0.85rem' }}>Last Activity</th>
+                  <th style={{ padding: '10px 8px', color: 'var(--text-secondary)', fontWeight: '500', fontSize: '0.85rem' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {chatSessions.map((session, idx) => (
+                  <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                    <td style={{ padding: '12px 8px', fontSize: '0.8rem', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>
+                      {session.user_id?.slice(0, 8)}...
+                    </td>
+                    <td style={{ padding: '12px 8px', fontSize: '0.9rem' }}>{session.title}</td>
+                    <td style={{ padding: '12px 8px', fontSize: '0.85rem', textAlign: 'center' }}>
+                      <span style={{
+                        display: 'inline-block', padding: '2px 10px', borderRadius: '12px',
+                        backgroundColor: '#dbeafe', color: '#1e40af', fontWeight: '600', fontSize: '0.8rem'
+                      }}>
+                        {session.message_count}
+                      </span>
+                    </td>
+                    <td style={{ padding: '12px 8px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                      {session.created_at ? new Date(session.created_at).toLocaleString() : '—'}
+                    </td>
+                    <td style={{ padding: '12px 8px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                      {session.last_message_at ? new Date(session.last_message_at).toLocaleString() : '—'}
+                    </td>
+                    <td style={{ padding: '12px 8px' }}>
+                      <button
+                        onClick={async () => {
+                          if (selectedSession === session.id) {
+                            setSelectedSession(null);
+                            setSessionMessages([]);
+                            return;
+                          }
+                          setLoadingMessages(true);
+                          setSelectedSession(session.id);
+                          try {
+                            const res = await fetch(`${API_URL}/api/admin/chat-sessions/${session.id}/messages`);
+                            const data = await res.json();
+                            setSessionMessages(data.messages || []);
+                          } catch (err) {
+                            console.error("Failed to fetch messages", err);
+                            setSessionMessages([]);
+                          } finally {
+                            setLoadingMessages(false);
+                          }
+                        }}
+                        style={{
+                          background: 'none', border: '1px solid var(--accent-color)',
+                          color: 'var(--accent-color)', padding: '4px 12px', borderRadius: '6px',
+                          cursor: 'pointer', fontSize: '0.8rem'
+                        }}
+                      >
+                        {selectedSession === session.id ? '▲ Close' : '👁️ View'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {/* Expanded Message Viewer */}
+          {selectedSession && (
+            <div style={{
+              marginTop: '16px', padding: '16px', borderRadius: '10px',
+              backgroundColor: 'var(--bg-color)', border: '1px solid var(--border-color)',
+              maxHeight: '400px', overflowY: 'auto'
+            }}>
+              <h3 style={{ margin: '0 0 12px 0', fontSize: '1rem', color: 'var(--text-primary)' }}>
+                📜 Conversation Transcript
+              </h3>
+              {loadingMessages ? (
+                <p style={{ color: 'var(--text-secondary)' }}>Loading messages...</p>
+              ) : sessionMessages.length === 0 ? (
+                <p style={{ color: 'var(--text-secondary)' }}>No messages in this session.</p>
+              ) : (
+                sessionMessages.map((msg, i) => (
+                  <div key={i} style={{
+                    display: 'flex', flexDirection: 'column',
+                    alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                    marginBottom: '12px'
+                  }}>
+                    <div style={{
+                      maxWidth: '75%', padding: '10px 14px', borderRadius: '12px',
+                      backgroundColor: msg.role === 'user' ? 'var(--accent-color)' : 'var(--sidebar-bg)',
+                      color: msg.role === 'user' ? 'white' : 'var(--text-primary)',
+                      fontSize: '0.9rem', lineHeight: '1.5',
+                      border: msg.role === 'assistant' ? '1px solid var(--border-color)' : 'none'
+                    }}>
+                      <strong style={{ fontSize: '0.75rem', textTransform: 'uppercase', opacity: 0.7 }}>
+                        {msg.role}
+                      </strong>
+                      <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                        {msg.content}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '4px', fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                      <span>{msg.created_at ? new Date(msg.created_at).toLocaleString() : ''}</span>
+                      {msg.feedback && (
+                        <span style={{ color: msg.feedback === 'up' ? '#10b981' : '#ef4444' }}>
+                          {msg.feedback === 'up' ? '👍' : '👎'}
+                        </span>
+                      )}
+                      {msg.source && <span>📎 {msg.source}</span>}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+
       </div>
     </div>
   );
