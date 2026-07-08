@@ -17,6 +17,7 @@ export default function AdminPanel() {
   const [selectedSession, setSelectedSession] = useState(null);
   const [sessionMessages, setSessionMessages] = useState([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [dbStatus, setDbStatus] = useState(null);
   const fileInputRef = useRef(null);
   const logsEndRef = useRef(null);
   const ingestStartTime = useRef(null);
@@ -37,9 +38,21 @@ export default function AdminPanel() {
       .catch(err => console.error("Failed to fetch chat sessions", err));
   };
 
+  // Fetch database connection status
+  const fetchDbStatus = () => {
+    fetch(`${API_URL}/api/admin/db-status`)
+      .then(res => res.json())
+      .then(data => setDbStatus(data))
+      .catch(err => {
+        console.error("Failed to fetch database status", err);
+        setDbStatus({ status: 'error', type: 'unknown', error: err.message });
+      });
+  };
+
   useEffect(() => {
     fetchFiles();
     fetchChatSessions();
+    fetchDbStatus();
   }, []);
 
   useEffect(() => {
@@ -200,6 +213,38 @@ export default function AdminPanel() {
             <h1 style={{ margin: 0, fontSize: '1.8rem' }}>🔧 TaxBot Admin Panel</h1>
             <p style={{ color: 'var(--text-secondary)', marginTop: '5px' }}>Manage knowledge base documents and trigger ingestion</p>
           </div>
+          {dbStatus && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '8px 14px',
+              borderRadius: '20px',
+              border: '1px solid var(--border-color)',
+              backgroundColor: 'var(--sidebar-bg)',
+              fontSize: '0.85rem',
+              boxShadow: '0 2px 6px rgba(0,0,0,0.05)'
+            }}>
+              <span>Database:</span>
+              <span style={{
+                display: 'inline-block',
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                backgroundColor: dbStatus.status === 'connected' 
+                  ? (dbStatus.type === 'supabase' ? '#10b981' : '#3b82f6')
+                  : '#ef4444'
+              }}></span>
+              <strong style={{ textTransform: 'capitalize' }}>
+                {dbStatus.type} ({dbStatus.status === 'connected' ? 'Connected' : 'Error'})
+              </strong>
+              {dbStatus.status === 'error' && (
+                <span style={{ color: '#ef4444', fontSize: '0.75rem', cursor: 'help' }} title={dbStatus.error}>
+                  ⚠️ Info
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Upload Section */}

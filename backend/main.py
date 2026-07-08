@@ -18,7 +18,10 @@ from database import (
     add_message,
     get_session_messages,
     update_session_title,
-    update_message_feedback
+    update_message_feedback,
+    get_db_status,
+    admin_get_all_chat_sessions,
+    admin_get_chat_session_details
 )
 
 # Load environment variables
@@ -732,50 +735,23 @@ async def admin_trigger_ingestion():
     return StreamingResponse(progress_generator(), media_type="text/event-stream")
 
 
+@app.get("/api/admin/db-status")
+def admin_db_status():
+    """Returns database connection diagnostics."""
+    return get_db_status()
+
 @app.get("/api/admin/chat-sessions")
 def admin_list_chat_sessions():
     """Returns all chat sessions across all users with message count and last activity."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT 
-            s.id, s.user_id, s.title, s.created_at,
-            COUNT(m.id) as message_count,
-            MAX(m.created_at) as last_message_at
-        FROM sessions s
-        LEFT JOIN messages m ON m.session_id = s.id
-        GROUP BY s.id
-        ORDER BY s.created_at DESC
-    """)
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
+    return admin_get_all_chat_sessions()
 
 @app.get("/api/admin/chat-sessions/{session_id}/messages")
 def admin_get_session_messages(session_id: str):
     """Returns all messages for a specific session."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Get session info
-    cursor.execute("SELECT id, user_id, title, created_at FROM sessions WHERE id = ?", (session_id,))
-    session = cursor.fetchone()
-    if not session:
-        conn.close()
+    data = admin_get_chat_session_details(session_id)
+    if not data:
         raise HTTPException(status_code=404, detail="Session not found")
-    
-    # Get messages
-    cursor.execute(
-        "SELECT id, role, content, source, feedback, created_at FROM messages WHERE session_id = ? ORDER BY created_at ASC",
-        (session_id,)
-    )
-    messages = cursor.fetchall()
-    conn.close()
-    
-    return {
-        "session": dict(session),
-        "messages": [dict(m) for m in messages]
-    }
+    return data
 
 
 if __name__ == "__main__":
