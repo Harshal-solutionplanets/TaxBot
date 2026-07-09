@@ -322,9 +322,10 @@ class DocumentIngestionPipeline:
             if not GEMINI_API_KEY:
                 raise ValueError("Gemini API key is not configured.")
             res = genai.embed_content(
-                model="models/text-embedding-004",
+                model="models/gemini-embedding-2",
                 content=text,
-                task_type="retrieval_document"
+                task_type="retrieval_document",
+                output_dimensionality=768
             )
             return res["embedding"]
 

@@ -101,9 +101,10 @@ def get_dense_embedding(text: str) -> list[float]:
         if not GEMINI_API_KEY:
             raise ValueError("GEMINI_API_KEY is missing in configuration.")
         res = genai.embed_content(
-            model="models/text-embedding-004",
+            model="models/gemini-embedding-2",
             content=text,
-            task_type="retrieval_query"
+            task_type="retrieval_query",
+            output_dimensionality=768
         )
         return res["embedding"]
 
