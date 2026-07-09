@@ -10,4 +10,5 @@ python-pptx
 google-generativeai
 moviepy
 rank-bm25
-numpy
+numpy
+supabase
