@@ -11,4 +11,5 @@ google-generativeai
 moviepy
 rank-bm25
 numpy
-supabase
+supabase
+gunicorn

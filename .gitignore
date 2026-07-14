@@ -13,6 +13,8 @@ backend/data/*
 
 # Local search models & caches
 backend/bm25_model.json
+backend/*.json
+backend/*.db
 **/__pycache__/
 *.pyc
 
@@ -26,3 +28,8 @@ frontend/*.log
 .idea/
 .DS_Store
 Thumbs.db
+
+# Temp / Zip files
+Stack_Explaination.zip
+Stack_Explaination/
+backend/output.txt

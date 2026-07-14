@@ -4,6 +4,8 @@ import uuid
 from datetime import datetime
 
 # Load environment variables
+from dotenv import load_dotenv
+load_dotenv(dotenv_path="../.env")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 

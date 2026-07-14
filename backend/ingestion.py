@@ -12,6 +12,7 @@ from pinecone_text.sparse import BM25Encoder
 
 # Load environment variables
 load_dotenv(dotenv_path="../.env")
+import concurrent.futures
 
 # Set up APIs
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -29,10 +30,11 @@ DATA_DIR = "./data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
 # Path to save BM25 encoder model locally
-BM25_MODEL_PATH = "./bm25_model.json"
+BM25_MODEL_PATH = "./bm25_ollama.json"
+DEFAULT_INDEX_NAME = "taxbot-hybrid-index"
 
 class DocumentIngestionPipeline:
-    def __init__(self, index_name="taxbot-hybrid-index"):
+    def __init__(self, index_name=DEFAULT_INDEX_NAME):
         self.index_name = index_name
         self.pc = None
         self.index = None
@@ -222,7 +224,7 @@ class DocumentIngestionPipeline:
             
             # Wait for file processing if needed
             print("Transcribing audio file via Gemini...")
-            model = genai.GenerativeModel("gemini-2.5-flash")
+            model = genai.GenerativeModel("gemini-flash-lite-latest")
             response = model.generate_content([
                 "Please transcribe this tax lecture audio file accurately. "
                 "Output timestamps in brackets like [MM:SS] at the start of each logical paragraph, "
@@ -322,7 +324,7 @@ class DocumentIngestionPipeline:
             if not GEMINI_API_KEY:
                 raise ValueError("Gemini API key is not configured.")
             res = genai.embed_content(
-                model="models/gemini-embedding-2",
+                model="models/text-embedding-004",
                 content=text,
                 task_type="retrieval_document",
                 output_dimensionality=768
@@ -413,79 +415,64 @@ class DocumentIngestionPipeline:
             return
 
         # Generate vectors and upsert to Pinecone
-        print("Generating embeddings and uploading to Pinecone in parallel...")
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        import threading
-        
+        print("Generating embeddings and uploading to Pinecone in batches...")
+        import time
         vectors_to_upsert = []
-        lock = threading.Lock()
         
-        def worker(idx, chunk):
-            text = chunk["text"]
-            metadata = chunk["metadata"]
+        # Filter out empty chunks first
+        valid_chunks = [(idx, chunk) for idx, chunk in enumerate(refined_chunks) if chunk["text"].strip()]
+        
+        batch_size = 90  # Safe limit under 100 for Gemini API
+        
+        for i in range(0, len(valid_chunks), batch_size):
+            batch = valid_chunks[i:i+batch_size]
+            texts = [c["text"] for idx, c in batch]
             
-            # Skip empty or whitespace-only chunks
-            if not text.strip():
-                return None
-                
-            # Ensure text itself is stored in the metadata for retrieval
-            metadata["text"] = text
-            
-            # Generate vectors
             try:
-                dense_vector = self.get_dense_embedding(text)
-                sparse_vector = self.get_sparse_embedding(text)
+                # 1. Dense Embeddings
+                if LLM_PROVIDER == "gemini":
+                    if not GEMINI_API_KEY:
+                        raise ValueError("Gemini API key is not configured.")
+                    res = genai.embed_content(
+                        model="models/text-embedding-004",
+                        content=texts,
+                        task_type="retrieval_document",
+                        output_dimensionality=768
+                    )
+                    dense_vectors = res["embedding"]
+                else:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+                        dense_vectors = list(executor.map(self.get_dense_embedding, texts))
                 
-                chunk_id = f"chunk_{metadata['source']}_{idx}"
-                # Clean up ID characters
-                chunk_id = re.sub(r'[^a-zA-Z0-9_\-\.#]', '_', chunk_id)
-                
-                vector_data = {
-                    "id": chunk_id,
-                    "values": dense_vector,
-                    "metadata": metadata
-                }
-                
-                # Only include sparse_values if they contain indices and values (Pinecone requirement)
-                if sparse_vector.get("indices") and sparse_vector.get("values"):
-                    vector_data["sparse_values"] = sparse_vector
-                
-                return vector_data
-                
-            except Exception as e:
-                print(f"[WARNING] Failed to generate vector for chunk {idx}: {e}")
-                return None
-
-        # Execute embedding generation and uploading in parallel using 16 workers
-        with ThreadPoolExecutor(max_workers=16) as executor:
-            futures = {executor.submit(worker, idx, chunk): idx for idx, chunk in enumerate(refined_chunks)}
-            
-            for future in as_completed(futures):
-                vector_data = future.result()
-                if not vector_data:
-                    continue
-                
-                # Safeguard adding to the upload queue and trigger batch upload under thread lock
-                with lock:
-                    vectors_to_upsert.append(vector_data)
+                # 2. Prepare Pinecone Vectors
+                for j, (idx, chunk) in enumerate(batch):
+                    text = chunk["text"]
+                    metadata = chunk["metadata"]
+                    metadata["text"] = text
                     
-                    if len(vectors_to_upsert) >= 50:
-                        try:
-                            self.index.upsert(vectors=vectors_to_upsert)
-                            print(f"Uploaded batch of {len(vectors_to_upsert)} chunks...")
-                        except Exception as e:
-                            print(f"[ERROR] Failed to upload batch: {e}")
-                        finally:
-                            vectors_to_upsert = []
-
-        # Final batch
-        if vectors_to_upsert:
-            try:
-                self.index.upsert(vectors=vectors_to_upsert)
-                print(f"Uploaded final batch of {len(vectors_to_upsert)} chunks.")
+                    sparse_vector = self.get_sparse_embedding(text)
+                    chunk_id = f"chunk_{metadata['source']}_{idx}"
+                    chunk_id = re.sub(r'[^a-zA-Z0-9_\-\.#]', '_', chunk_id)
+                    
+                    vector_data = {
+                        "id": chunk_id,
+                        "values": dense_vectors[j],
+                        "metadata": metadata
+                    }
+                    if sparse_vector.get("indices") and sparse_vector.get("values"):
+                        vector_data["sparse_values"] = sparse_vector
+                        
+                    vectors_to_upsert.append(vector_data)
+                
+                # 3. Upsert
+                if vectors_to_upsert:
+                    self.index.upsert(vectors=vectors_to_upsert)
+                    print(f"Uploaded batch of {len(vectors_to_upsert)} chunks... ({i+len(batch)}/{len(valid_chunks)})")
+                    vectors_to_upsert = []
+                    
             except Exception as e:
-                print(f"[ERROR] Failed to upload final batch: {e}")
-            
+                print(f"[ERROR] Failed to process batch {i}: {e}")
+                
         print("[SUCCESS] Ingestion Pipeline completed successfully!")
 
 if __name__ == "__main__":

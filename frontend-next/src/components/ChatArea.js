@@ -1,14 +1,23 @@
 import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 
-const API_URL = 'http://127.0.0.1:8000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 
 export default function ChatArea({ activeSessionId, setActiveSessionId }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [followups, setFollowups] = useState([]);
+  const [suggestionsEnabled, setSuggestionsEnabled] = useState(false);
   const messagesEndRef = useRef(null);
+
+  // Fetch backend feature flags on mount
+  useEffect(() => {
+    fetch(`${API_URL}/api/config`)
+      .then(res => res.json())
+      .then(data => setSuggestionsEnabled(data.suggestion_questions ?? false))
+      .catch(() => setSuggestionsEnabled(false));
+  }, []);
 
   // Scroll to bottom on new message or loading change
   const scrollToBottom = () => {
@@ -34,8 +43,12 @@ export default function ChatArea({ activeSessionId, setActiveSessionId }) {
     }
   }, [activeSessionId]);
 
-  // Generate smart follow-up suggestions dynamically
+  // Generate smart follow-up suggestions dynamically (only when enabled)
   useEffect(() => {
+    if (!suggestionsEnabled) {
+      setFollowups([]);
+      return;
+    }
     if (messages.length > 0 && messages[messages.length - 1].role === 'assistant' && !isLoading) {
       const historyPayload = messages.map(m => ({ role: m.role, content: m.content }));
       fetch(`${API_URL}/api/query/suggest-followups`, {
@@ -51,7 +64,7 @@ export default function ChatArea({ activeSessionId, setActiveSessionId }) {
     } else {
       setFollowups([]);
     }
-  }, [messages, isLoading]);
+  }, [messages, isLoading, suggestionsEnabled]);
 
   const triggerQuery = async (userMessage) => {
     if (!userMessage.trim() || isLoading) return;
@@ -233,7 +246,15 @@ export default function ChatArea({ activeSessionId, setActiveSessionId }) {
           <div key={idx} className={`message-wrapper ${msg.role}`}>
             <div className="message-bubble">
               {msg.role === 'assistant' ? (
-                <ReactMarkdown>{msg.content}</ReactMarkdown>
+                msg.content ? (
+                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                ) : (
+                  <div className="typing-indicator" style={{ padding: '0.5rem 0' }}>
+                    <div className="typing-dot"></div>
+                    <div className="typing-dot"></div>
+                    <div className="typing-dot"></div>
+                  </div>
+                )
               ) : (
                 msg.content
               )}

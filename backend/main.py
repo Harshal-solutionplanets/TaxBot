@@ -1,6 +1,8 @@
 import os
 import shutil
 import json
+import hashlib
+import time
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -27,7 +29,12 @@ from database import (
 # Load environment variables
 load_dotenv(dotenv_path="../.env")
 
-app = FastAPI(title="Tax Open-Book Bot Backend")
+# Initialize FastAPI
+app = FastAPI(title="TaxBot API")
+
+# --- Answer Cache ---
+answer_cache = {}
+CACHE_TTL_SECONDS = 24 * 60 * 60
 
 app.add_middleware(
     CORSMiddleware,
@@ -57,8 +64,17 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_LLM_MODEL = os.getenv("OLLAMA_LLM_MODEL", "llama3.1")
 OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
-INDEX_NAME = "taxbot-hybrid-index"
-BM25_MODEL_PATH = "./bm25_model.json"
+SUGGESTION_QUESTIONS = os.getenv("SUGGESTION_QUESTIONS", "False").lower() in ("true", "1", "yes")
+RAG_TOP_K = int(os.getenv("RAG_TOP_K", "10"))
+MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "2048"))
+if LLM_PROVIDER == "gemini":
+    # Using the Ollama-generated index for Gemini because Gemini Free Tier 
+    # cannot embed 9,000+ chunks (hits 100/min and 1,500/day limits).
+    INDEX_NAME = "taxbot-hybrid-index"
+    BM25_MODEL_PATH = "./bm25_ollama.json"
+else:
+    INDEX_NAME = "taxbot-hybrid-index"
+    BM25_MODEL_PATH = "./bm25_ollama.json"
 
 # Initialize global clients
 pc = None
@@ -90,23 +106,32 @@ if os.path.exists(BM25_MODEL_PATH):
 
 # Helper: Dense Embedding
 def get_dense_embedding(text: str) -> list[float]:
-    if LLM_PROVIDER == "ollama":
-        res = requests.post(f"{OLLAMA_BASE_URL}/api/embeddings", json={
-            "model": OLLAMA_EMBED_MODEL,
-            "prompt": text
-        })
-        res.raise_for_status()
-        return res.json()["embedding"]
-    else:
+    if LLM_PROVIDER == "gemini":
         if not GEMINI_API_KEY:
-            raise ValueError("GEMINI_API_KEY is missing in configuration.")
-        res = genai.embed_content(
-            model="models/gemini-embedding-2",
-            content=text,
-            task_type="retrieval_query",
-            output_dimensionality=768
-        )
-        return res["embedding"]
+            print("[ERROR] Gemini API Key missing for query embedding.")
+            return []
+        try:
+            res = genai.embed_content(
+                model="models/text-embedding-004",
+                content=text,
+                task_type="retrieval_query",
+                output_dimensionality=768
+            )
+            return res["embedding"]
+        except Exception as e:
+            print(f"[ERROR] Gemini embedding failed: {e}")
+            return []
+    else:
+        try:
+            res = requests.post(f"{OLLAMA_BASE_URL}/api/embeddings", json={
+                "model": OLLAMA_EMBED_MODEL,
+                "prompt": text
+            })
+            res.raise_for_status()
+            return res.json()["embedding"]
+        except Exception as e:
+            print(f"[ERROR] Local embedding failed: {e}")
+            return []
 
 # Helper: Hybrid Score Combination
 def perform_hybrid_query(query_text: str, alpha: float = 0.5, top_k: int = 5):
@@ -210,7 +235,7 @@ def generate_grounded_response(question: str, context_chunks: list[dict]) -> dic
         }
         
         model = genai.GenerativeModel(
-            model_name="gemini-2.5-flash",
+            model_name="gemini-flash-lite-latest",
             system_instruction=system_instruction,
             generation_config=generation_config
         )
@@ -352,17 +377,21 @@ def generate_grounded_response_stream(question: str, context_chunks: list[dict],
                 # Configure model parameters
                 generation_config = {
                     "temperature": 0.0,
-                    "max_output_tokens": 1024,
+                    "max_output_tokens": MAX_OUTPUT_TOKENS,
                 }
                 
                 model = genai.GenerativeModel(
-                    model_name="gemini-2.5-flash",
+                    model_name="gemini-flash-lite-latest",
                     system_instruction=system_instruction,
                     generation_config=generation_config
                 )
                 response = model.generate_content(user_prompt, stream=True)
                 for chunk in response:
-                    text = chunk.text
+                    try:
+                        text = chunk.text
+                    except ValueError:
+                        text = ""
+                        
                     if text:
                         accumulated_answer += text
                         yield json.dumps({"event": "content", "text": text}) + "\n"
@@ -376,6 +405,14 @@ def generate_grounded_response_stream(question: str, context_chunks: list[dict],
         add_message(session_id, "assistant", accumulated_answer, source_str)
     except Exception as e:
         print(f"[WARNING] Failed to save assistant message: {e}")
+
+    # Add to cache
+    question_key = hashlib.md5(question.strip().lower().encode()).hexdigest()
+    answer_cache[question_key] = {
+        "answer": accumulated_answer,
+        "source": source_str,
+        "timestamp": time.time()
+    }
 
     yield json.dumps({"event": "done"}) + "\n"
 
@@ -418,10 +455,41 @@ async def process_tax_query(request: QueryRequest):
     except Exception as e:
         print(f"[WARNING] Failed to save user message: {e}")
 
+    # Check Answer Cache first
+    question_key = hashlib.md5(request.question.strip().lower().encode()).hexdigest()
+    if question_key in answer_cache:
+        cached_data = answer_cache[question_key]
+        if time.time() - cached_data["timestamp"] < CACHE_TTL_SECONDS:
+            # Save assistant message directly
+            try:
+                add_message(session_id, "assistant", cached_data["answer"], cached_data["source"])
+            except Exception as e:
+                print(f"[WARNING] Failed to save assistant message: {e}")
+                
+            def cached_generator():
+                yield json.dumps({
+                    "event": "metadata",
+                    "session_id": session_id,
+                    "source": cached_data["source"]
+                }) + "\n"
+                
+                # Stream it in small chunks to simulate generation so UI looks natural
+                ans = cached_data["answer"]
+                chunk_size = 50
+                for i in range(0, len(ans), chunk_size):
+                    yield json.dumps({"event": "content", "text": ans[i:i+chunk_size]}) + "\n"
+                    time.sleep(0.02)
+                    
+                yield json.dumps({"event": "done"}) + "\n"
+                
+            return StreamingResponse(cached_generator(), media_type="text/event-stream")
+        else:
+            del answer_cache[question_key]
+
     try:
         # Search hybrid index
         if index:
-            search_results = perform_hybrid_query(request.question, alpha=0.5, top_k=20)
+            search_results = perform_hybrid_query(request.question, alpha=0.5, top_k=RAG_TOP_K)
             matches = search_results.get("matches", [])
         else:
             matches = []
@@ -462,8 +530,19 @@ async def process_tax_query(request: QueryRequest):
 class FollowupsRequest(BaseModel):
     conversation_history: list[dict]
 
+@app.get("/api/config")
+def get_app_config():
+    """Returns client-facing feature flags so the frontend can adapt."""
+    return {
+        "suggestion_questions": SUGGESTION_QUESTIONS,
+        "llm_provider": LLM_PROVIDER,
+    }
+
 @app.post("/api/query/suggest-followups")
 def suggest_followups(request: FollowupsRequest):
+    # Cost gate: skip Gemini call entirely when suggestions are disabled
+    if not SUGGESTION_QUESTIONS:
+        return []
     if not GEMINI_API_KEY:
         return []
         
@@ -480,7 +559,7 @@ def suggest_followups(request: FollowupsRequest):
             f"Output format: [\"question 1\", \"question 2\", \"question 3\"]"
         )
         
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel("gemini-flash-lite-latest")
         res = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
         questions = json.loads(res.text)
         if isinstance(questions, list) and len(questions) >= 3:
@@ -757,4 +836,4 @@ def admin_get_session_messages(session_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
