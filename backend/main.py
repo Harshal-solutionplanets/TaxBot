@@ -816,8 +816,8 @@ async def admin_trigger_ingestion():
                 yield msg + "\n"
             except queue.Empty:
                 # Render load balancer times out idle connections at 100s. 
-                # Send SSE comment to keep connection alive during long parsing.
-                yield ": keep-alive\n\n"
+                # Send valid JSON keep-alive with padding to defeat Gunicorn buffering.
+                yield json.dumps({"event": "keepalive"}) + " " * 1024 + "\n"
     
     return StreamingResponse(generate(), media_type="text/event-stream")
 
