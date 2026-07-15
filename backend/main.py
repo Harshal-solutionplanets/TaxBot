@@ -142,7 +142,8 @@ def perform_hybrid_query(query_text: str, alpha: float = 0.5, top_k: int = 5):
     # 1. Dense Vector
     dense_vec = get_dense_embedding(query_text)
     if not dense_vec:
-        raise ValueError("Failed to generate dense embedding. Please check the backend logs or GEMINI_API_KEY.")
+        print("[WARNING] Failed to generate dense embedding (API limit reached?). Falling back to sparse-only search.")
+        dense_vec = [0.0] * 768
     
     # 2. Sparse Vector
     if not bm25:
