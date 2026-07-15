@@ -227,7 +227,7 @@ class DocumentIngestionPipeline:
             
             # Wait for file processing if needed
             print("Transcribing audio file via Gemini...")
-            model = genai.GenerativeModel("gemini-1.5-flash")
+            model = genai.GenerativeModel("gemini-flash-latest")
             response = model.generate_content([
                 "Please transcribe this tax lecture audio file accurately. "
                 "Output timestamps in brackets like [MM:SS] at the start of each logical paragraph, "
