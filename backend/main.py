@@ -803,18 +803,23 @@ async def admin_trigger_ingestion():
         finally:
             progress_queue.put(None)  # Signal end of stream
     
-    def progress_generator():
+    def generate():
         # Start ingestion in a background thread
         thread = threading.Thread(target=run_ingestion, daemon=True)
         thread.start()
-        
         while True:
-            item = progress_queue.get()
-            if item is None:
-                break
-            yield item + "\n"
+            try:
+                # Wait for progress messages, timeout after 15s to send keep-alive
+                msg = progress_queue.get(timeout=15)
+                if msg is None:
+                    break
+                yield msg + "\n"
+            except queue.Empty:
+                # Render load balancer times out idle connections at 100s. 
+                # Send SSE comment to keep connection alive during long parsing.
+                yield ": keep-alive\n\n"
     
-    return StreamingResponse(progress_generator(), media_type="text/event-stream")
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 @app.get("/api/admin/db-status")

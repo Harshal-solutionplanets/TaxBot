@@ -336,7 +336,9 @@ class DocumentIngestionPipeline:
     def fit_bm25(self, all_texts):
         """Fits the BM25 model on all text chunks and saves it locally."""
         print("Fitting BM25 encoder on corpus...")
-        self.bm25.fit(all_texts)
+        # To avoid Out-Of-Memory (OOM) on 512MB RAM servers, fit on a subset if corpus is huge
+        sample_texts = all_texts[:5000] if len(all_texts) > 5000 else all_texts
+        self.bm25.fit(sample_texts)
         self.bm25.dump(BM25_MODEL_PATH)
         print(f"BM25 encoder fitted and saved to: {BM25_MODEL_PATH}")
 
