@@ -141,6 +141,8 @@ def perform_hybrid_query(query_text: str, alpha: float = 0.5, top_k: int = 5):
     
     # 1. Dense Vector
     dense_vec = get_dense_embedding(query_text)
+    if not dense_vec:
+        raise ValueError("Failed to generate dense embedding. Please check the backend logs or GEMINI_API_KEY.")
     
     # 2. Sparse Vector
     if not bm25:
@@ -381,7 +383,7 @@ def generate_grounded_response_stream(question: str, context_chunks: list[dict],
                 }
                 
                 model = genai.GenerativeModel(
-                    model_name="gemini-flash-lite-latest",
+                    model_name="gemini-2.5-flash",
                     system_instruction=system_instruction,
                     generation_config=generation_config
                 )
