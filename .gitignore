@@ -12,7 +12,6 @@ backend/data/
 backend/data/*
 
 # Local search models & caches
-backend/bm25_model.json
 backend/*.db
 **/__pycache__/
 *.pyc
