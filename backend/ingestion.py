@@ -3,7 +3,10 @@ import re
 import pickle
 import fitz # PyMuPDF
 from pptx import Presentation
-from moviepy import VideoFileClip
+try:
+    from moviepy import VideoFileClip
+except ImportError:
+    from moviepy.editor import VideoFileClip
 import google.generativeai as genai
 from dotenv import load_dotenv
 import requests
@@ -224,7 +227,7 @@ class DocumentIngestionPipeline:
             
             # Wait for file processing if needed
             print("Transcribing audio file via Gemini...")
-            model = genai.GenerativeModel("gemini-flash-lite-latest")
+            model = genai.GenerativeModel("gemini-1.5-flash")
             response = model.generate_content([
                 "Please transcribe this tax lecture audio file accurately. "
                 "Output timestamps in brackets like [MM:SS] at the start of each logical paragraph, "
