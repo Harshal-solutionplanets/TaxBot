@@ -13,3 +13,4 @@ rank-bm25
 numpy
 supabase
 gunicorn
+python-multipart
