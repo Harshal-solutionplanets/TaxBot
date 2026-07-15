@@ -3,7 +3,7 @@ import re
 import pickle
 import fitz # PyMuPDF
 from pptx import Presentation
-from moviepy.editor import VideoFileClip
+from moviepy import VideoFileClip
 import google.generativeai as genai
 from dotenv import load_dotenv
 import requests
