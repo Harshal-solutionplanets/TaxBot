@@ -238,7 +238,7 @@ def generate_grounded_response(question: str, context_chunks: list[dict]) -> dic
         }
         
         model = genai.GenerativeModel(
-            model_name="gemini-2.5-flash-lite",
+            model_name="gemini-3.1-flash-lite",
             system_instruction=system_instruction,
             generation_config=generation_config
         )
@@ -384,7 +384,7 @@ def generate_grounded_response_stream(question: str, context_chunks: list[dict],
                 }
                 
                 model = genai.GenerativeModel(
-                    model_name="gemini-2.5-flash-lite",
+                    model_name="gemini-3.1-flash-lite",
                     system_instruction=system_instruction,
                     generation_config=generation_config
                 )
@@ -562,7 +562,7 @@ def suggest_followups(request: FollowupsRequest):
             f"Output format: [\"question 1\", \"question 2\", \"question 3\"]"
         )
         
-        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        model = genai.GenerativeModel("gemini-3.1-flash-lite")
         res = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
         questions = json.loads(res.text)
         if isinstance(questions, list) and len(questions) >= 3:
