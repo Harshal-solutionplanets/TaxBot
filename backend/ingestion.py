@@ -479,7 +479,32 @@ class DocumentIngestionPipeline:
                 print(f"[ERROR] Failed to process batch {i}: {e}")
                 
         print("[SUCCESS] Ingestion Pipeline completed successfully!")
+        
+        # Return refined_chunks so callers can use it for tracking
+        return refined_chunks
 
 if __name__ == "__main__":
     pipeline = DocumentIngestionPipeline()
-    pipeline.process_all_files()
+    refined_chunks = pipeline.process_all_files()
+    
+    # Track ingested documents in Supabase so they appear in the Admin Panel
+    if refined_chunks:
+        try:
+            from database import upsert_ingested_document
+            
+            # Count chunks per source file
+            chunks_per_file = {}
+            for chunk in refined_chunks:
+                source = chunk["metadata"].get("source", "unknown")
+                chunks_per_file[source] = chunks_per_file.get(source, 0) + 1
+            
+            # Upsert each file's metadata into Supabase
+            for filename, chunk_count in chunks_per_file.items():
+                file_path = os.path.join(DATA_DIR, filename)
+                ext = os.path.splitext(filename)[1].lower().replace(".", "").upper()
+                size_mb = os.path.getsize(file_path) / (1024 * 1024) if os.path.exists(file_path) else 0
+                upsert_ingested_document(filename, ext, size_mb, chunk_count)
+            
+            print(f"[SUCCESS] Tracked {len(chunks_per_file)} documents in Supabase.")
+        except Exception as e:
+            print(f"[WARNING] Failed to track documents in Supabase: {e}")

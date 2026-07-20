@@ -23,7 +23,10 @@ from database import (
     update_message_feedback,
     get_db_status,
     admin_get_all_chat_sessions,
-    admin_get_chat_session_details
+    admin_get_chat_session_details,
+    upsert_ingested_document,
+    get_all_ingested_documents,
+    delete_ingested_document
 )
 
 # Load environment variables
@@ -588,30 +591,8 @@ def log_message_feedback(message_id: str, request: FeedbackRequest):
 
 @app.get("/api/admin/files")
 def list_data_files():
-    """Returns a list of all files in the data directory with metadata."""
-    data_dir = "./data"
-    os.makedirs(data_dir, exist_ok=True)
-    
-    files = []
-    supported_ext = {".pdf", ".pptx", ".ppt", ".vtt"}
-    for filename in os.listdir(data_dir):
-        file_path = os.path.join(data_dir, filename)
-        if os.path.isfile(file_path):
-            ext = os.path.splitext(filename)[1].lower()
-            if ext not in supported_ext:
-                continue
-            stat = os.stat(file_path)
-            from datetime import datetime
-            files.append({
-                "filename": filename,
-                "size_mb": round(stat.st_size / (1024 * 1024), 2),
-                "type": ext.replace(".", "").upper(),
-                "uploaded_at": datetime.fromtimestamp(stat.st_mtime).isoformat()
-            })
-    
-    # Sort by upload time descending
-    files.sort(key=lambda x: x["uploaded_at"], reverse=True)
-    return files
+    """Returns a list of all ingested documents from Supabase."""
+    return get_all_ingested_documents()
 
 @app.post("/api/admin/upload")
 async def admin_upload_files(files: list[UploadFile] = File(...)):
@@ -645,15 +626,18 @@ async def admin_upload_files(files: list[UploadFile] = File(...)):
 
 @app.delete("/api/admin/files/{filename}")
 def admin_delete_file(filename: str):
-    """Delete a file from the data directory."""
+    """Delete a file from the data directory and remove its Supabase tracking record."""
+    # Try to remove local file if it exists (may not exist if ingested remotely)
     file_path = os.path.join("./data", filename)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail=f"File '{filename}' not found.")
-    try:
-        os.remove(file_path)
-        return {"status": "success", "message": f"Deleted '{filename}'"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    if os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+        except Exception as e:
+            print(f"[WARNING] Could not delete local file '{filename}': {e}")
+    
+    # Always remove the Supabase tracking record
+    delete_ingested_document(filename)
+    return {"status": "success", "message": f"Deleted '{filename}'"}
 
 @app.post("/api/admin/ingest")
 async def admin_trigger_ingestion():
@@ -798,6 +782,20 @@ async def admin_trigger_ingestion():
                 "message": f"Ingestion complete! {total_chunks} chunks from {total_files} files uploaded to Pinecone.",
                 "percent": 100
             }))
+            
+            # --- Phase 6: Track ingested documents in Supabase ---
+            # Count chunks per source file for accurate tracking
+            chunks_per_file = {}
+            for chunk in refined_chunks:
+                source = chunk["metadata"].get("source", "unknown")
+                chunks_per_file[source] = chunks_per_file.get(source, 0) + 1
+            
+            for filename in supported_files:
+                file_path = os.path.join(data_dir, filename)
+                ext = os.path.splitext(filename)[1].lower().replace(".", "").upper()
+                size_mb = os.path.getsize(file_path) / (1024 * 1024) if os.path.exists(file_path) else 0
+                chunk_count = chunks_per_file.get(filename, 0)
+                upsert_ingested_document(filename, ext, size_mb, chunk_count)
             
         except Exception as e:
             progress_queue.put(json.dumps({"event": "error", "message": f"Ingestion failed: {str(e)}"}))

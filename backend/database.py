@@ -316,3 +316,47 @@ def admin_get_chat_session_details(session_id: str) -> dict:
             "session": dict(session),
             "messages": [dict(m) for m in messages]
         }
+
+# --- Ingested Documents Tracking (Supabase-only) ---
+
+def upsert_ingested_document(filename: str, file_type: str, size_mb: float, chunk_count: int):
+    """Inserts or updates a document record in the ingested_documents table.
+    Uses upsert on filename so re-ingesting the same file updates it."""
+    if USE_SUPABASE and supabase:
+        try:
+            supabase.table("ingested_documents").upsert({
+                "filename": filename,
+                "file_type": file_type,
+                "size_mb": round(size_mb, 2),
+                "chunk_count": chunk_count,
+                "ingested_at": datetime.utcnow().isoformat()
+            }, on_conflict="filename").execute()
+            print(f"[DB] Tracked ingested document: {filename} ({chunk_count} chunks)")
+        except Exception as e:
+            print(f"[WARNING] Failed to track ingested document '{filename}': {e}")
+    else:
+        print(f"[WARNING] Supabase not available. Skipping document tracking for '{filename}'.")
+
+def get_all_ingested_documents() -> list[dict]:
+    """Returns all ingested documents from Supabase, sorted by ingested_at descending."""
+    if USE_SUPABASE and supabase:
+        try:
+            res = supabase.table("ingested_documents") \
+                .select("filename, file_type, size_mb, chunk_count, ingested_at") \
+                .order("ingested_at", desc=True) \
+                .execute()
+            return res.data
+        except Exception as e:
+            print(f"[ERROR] Failed to fetch ingested documents: {e}")
+            return []
+    else:
+        return []
+
+def delete_ingested_document(filename: str):
+    """Deletes a document record from Supabase by filename."""
+    if USE_SUPABASE and supabase:
+        try:
+            supabase.table("ingested_documents").delete().eq("filename", filename).execute()
+            print(f"[DB] Removed ingested document record: {filename}")
+        except Exception as e:
+            print(f"[WARNING] Failed to delete document record '{filename}': {e}")
