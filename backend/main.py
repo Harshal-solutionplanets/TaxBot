@@ -596,9 +596,16 @@ def list_data_files():
 
 @app.post("/api/admin/upload")
 async def admin_upload_files(files: list[UploadFile] = File(...)):
-    """Upload one or more files to the data directory."""
+    """Upload one or more files to the appropriate data subdirectory."""
     data_dir = "./data"
-    os.makedirs(data_dir, exist_ok=True)
+    subdir_map = {
+        ".pdf": os.path.join(data_dir, "pdf_data"),
+        ".pptx": os.path.join(data_dir, "pptx_data"),
+        ".ppt": os.path.join(data_dir, "pptx_data"),
+        ".vtt": os.path.join(data_dir, "vtt_data"),
+    }
+    for d in subdir_map.values():
+        os.makedirs(d, exist_ok=True)
     
     uploaded = []
     errors = []
@@ -609,8 +616,9 @@ async def admin_upload_files(files: list[UploadFile] = File(...)):
         if ext not in supported_ext:
             errors.append(f"Unsupported file type: {file.filename} ({ext})")
             continue
-            
-        file_path = os.path.join(data_dir, file.filename)
+        
+        target_dir = subdir_map.get(ext, data_dir)
+        file_path = os.path.join(target_dir, file.filename)
         try:
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
@@ -626,14 +634,23 @@ async def admin_upload_files(files: list[UploadFile] = File(...)):
 
 @app.delete("/api/admin/files/{filename}")
 def admin_delete_file(filename: str):
-    """Delete a file from the data directory and remove its Supabase tracking record."""
-    # Try to remove local file if it exists (may not exist if ingested remotely)
-    file_path = os.path.join("./data", filename)
-    if os.path.exists(file_path):
-        try:
-            os.remove(file_path)
-        except Exception as e:
-            print(f"[WARNING] Could not delete local file '{filename}': {e}")
+    """Delete a file from the data directory (checking subdirs) and remove its Supabase tracking record."""
+    # Search in root and all subdirectories
+    data_dir = "./data"
+    search_dirs = [
+        data_dir,
+        os.path.join(data_dir, "pdf_data"),
+        os.path.join(data_dir, "pptx_data"),
+        os.path.join(data_dir, "vtt_data"),
+    ]
+    for d in search_dirs:
+        file_path = os.path.join(d, filename)
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                print(f"[WARNING] Could not delete local file '{filename}': {e}")
+            break
     
     # Always remove the Supabase tracking record
     delete_ingested_document(filename)
@@ -659,15 +676,31 @@ async def admin_trigger_ingestion():
             pipeline = DocumentIngestionPipeline()
             
             # --- Phase 1: Parse files ---
-            progress_queue.put(json.dumps({"event": "progress", "step": "parse", "message": "Scanning data directory...", "percent": 10}))
+            progress_queue.put(json.dumps({"event": "progress", "step": "parse", "message": "Scanning data directories...", "percent": 10}))
             
             data_dir = "./data"
-            all_files = [f for f in os.listdir(data_dir) if os.path.isfile(os.path.join(data_dir, f))]
-            supported_files = [f for f in all_files if os.path.splitext(f)[1].lower() in {".pdf", ".pptx", ".ppt", ".vtt"}]
-            total_files = len(supported_files)
+            subdirs = [
+                data_dir,
+                os.path.join(data_dir, "pdf_data"),
+                os.path.join(data_dir, "pptx_data"),
+                os.path.join(data_dir, "vtt_data"),
+            ]
+            
+            # Collect all supported files from root + subdirectories
+            supported_ext = {".pdf", ".pptx", ".ppt", ".vtt"}
+            file_entries = []  # list of (filename, full_path)
+            for d in subdirs:
+                if not os.path.exists(d):
+                    continue
+                for f in os.listdir(d):
+                    full = os.path.join(d, f)
+                    if os.path.isfile(full) and os.path.splitext(f)[1].lower() in supported_ext:
+                        file_entries.append((f, full))
+            
+            total_files = len(file_entries)
             
             if total_files == 0:
-                progress_queue.put(json.dumps({"event": "error", "message": "No supported files found in data directory."}))
+                progress_queue.put(json.dumps({"event": "error", "message": "No supported files found in data directories."}))
                 progress_queue.put(None)
                 return
             
@@ -677,8 +710,7 @@ async def admin_trigger_ingestion():
             all_raw_chunks = []
             vtt_bases = set()
             
-            for i, filename in enumerate(supported_files):
-                file_path = os.path.join(data_dir, filename)
+            for i, (filename, file_path) in enumerate(file_entries):
                 ext = os.path.splitext(filename)[1].lower()
                 file_percent = 15 + int((i / total_files) * 25)
                 progress_queue.put(json.dumps({"event": "progress", "step": "parse", "message": f"Parsing: {filename}", "percent": file_percent}))
@@ -793,8 +825,7 @@ async def admin_trigger_ingestion():
                 source = chunk["metadata"].get("source", "unknown")
                 chunks_per_file[source] = chunks_per_file.get(source, 0) + 1
             
-            for filename in supported_files:
-                file_path = os.path.join(data_dir, filename)
+            for filename, file_path in file_entries:
                 ext = os.path.splitext(filename)[1].lower().replace(".", "").upper()
                 size_mb = os.path.getsize(file_path) / (1024 * 1024) if os.path.exists(file_path) else 0
                 chunk_count = chunks_per_file.get(filename, 0)

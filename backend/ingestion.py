@@ -30,7 +30,14 @@ if GEMINI_API_KEY:
 
 # Define directories
 DATA_DIR = "./data"
+DATA_SUBDIRS = {
+    "pdf": os.path.join(DATA_DIR, "pdf_data"),
+    "pptx": os.path.join(DATA_DIR, "pptx_data"),
+    "vtt": os.path.join(DATA_DIR, "vtt_data"),
+}
 os.makedirs(DATA_DIR, exist_ok=True)
+for subdir in DATA_SUBDIRS.values():
+    os.makedirs(subdir, exist_ok=True)
 
 # Path to save BM25 encoder model locally
 BM25_MODEL_PATH = "./bm25_ollama.json"
@@ -360,24 +367,34 @@ class DocumentIngestionPipeline:
     # --- 5. Main Processing Run ---
 
     def process_all_files(self):
-        """Iterates over data directory, processes files, and pushes to Pinecone."""
+        """Iterates over data directory (including subdirs), processes files, and pushes to Pinecone."""
         if not os.path.exists(DATA_DIR):
             print(f"Data directory '{DATA_DIR}' does not exist.")
             return
 
         all_raw_chunks = []
         
+        # Collect all files from subdirectories and root data dir (backwards compatibility)
+        all_file_paths = []
+        scan_dirs = [DATA_DIR] + list(DATA_SUBDIRS.values())
+        for scan_dir in scan_dirs:
+            if not os.path.exists(scan_dir):
+                continue
+            for filename in os.listdir(scan_dir):
+                file_path = os.path.join(scan_dir, filename)
+                if os.path.isfile(file_path):
+                    all_file_paths.append(file_path)
+        
         # Build a set of recording base names that have a VTT subtitle file
         # e.g. "GMT20260108-120125_Recording.cc.vtt" -> base "GMT20260108-120125_Recording"
         vtt_bases = set()
-        for filename in os.listdir(DATA_DIR):
-            if filename.lower().endswith(".vtt"):
-                # Strip all extensions (e.g. ".cc.vtt") to get the recording base name
-                base = filename.split(".")[0]
+        for file_path in all_file_paths:
+            if file_path.lower().endswith(".vtt"):
+                base = os.path.basename(file_path).split(".")[0]
                 vtt_bases.add(base)
         
-        for filename in os.listdir(DATA_DIR):
-            file_path = os.path.join(DATA_DIR, filename)
+        for file_path in all_file_paths:
+            filename = os.path.basename(file_path)
             ext = os.path.splitext(filename)[1].lower()
             
             try:
