@@ -18,6 +18,7 @@ export default function AdminPanel() {
   const [sessionMessages, setSessionMessages] = useState([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [dbStatus, setDbStatus] = useState(null);
+  const [sortBy, setSortBy] = useState('ingested_at');
   const fileInputRef = useRef(null);
   const logsEndRef = useRef(null);
   const ingestStartTime = useRef(null);
@@ -202,6 +203,23 @@ export default function AdminPanel() {
       fetchFiles();
     }
   };
+
+  const sortedFiles = [...files].sort((a, b) => {
+    if (sortBy === 'ingested_at') {
+      const dateA = new Date(a.ingested_at || a.uploaded_at || 0);
+      const dateB = new Date(b.ingested_at || b.uploaded_at || 0);
+      return dateB - dateA;
+    }
+    if (sortBy === 'size') {
+      return (b.size_mb || 0) - (a.size_mb || 0);
+    }
+    if (sortBy === 'type') {
+      const typeA = (a.file_type || a.type || '').toUpperCase();
+      const typeB = (b.file_type || b.type || '').toUpperCase();
+      return typeA.localeCompare(typeB);
+    }
+    return 0;
+  });
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: 'var(--bg-color)', color: 'var(--text-primary)', padding: '40px' }}>
@@ -478,9 +496,33 @@ export default function AdminPanel() {
           padding: '24px',
           border: '1px solid var(--border-color)'
         }}>
-          <h2 style={{ margin: '0 0 16px 0', fontSize: '1.2rem' }}>
-            📚 Knowledge Base ({files.length} files)
-          </h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+            <h2 style={{ margin: 0, fontSize: '1.2rem' }}>
+              📚 Knowledge Base ({files.length} files)
+            </h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Sort by:</span>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-color)',
+                  backgroundColor: 'var(--bg-color)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                  outline: 'none',
+                  transition: 'border-color 0.2s ease',
+                }}
+              >
+                <option value="ingested_at">Ingestion Datetime</option>
+                <option value="size">Size</option>
+                <option value="type">File Type</option>
+              </select>
+            </div>
+          </div>
 
           {files.length === 0 ? (
             <p style={{ color: 'var(--text-secondary)' }}>No documents in the knowledge base yet. Upload some files above.</p>
@@ -497,7 +539,7 @@ export default function AdminPanel() {
                 </tr>
               </thead>
               <tbody>
-                {files.map((file, idx) => (
+                {sortedFiles.map((file, idx) => (
                   <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
                     <td style={{ padding: '12px 8px', fontSize: '0.9rem' }}>{file.filename}</td>
                     <td style={{ padding: '12px 8px' }}>
