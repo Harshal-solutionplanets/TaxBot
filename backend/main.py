@@ -683,13 +683,16 @@ async def admin_trigger_ingestion():
                 file_percent = 15 + int((i / total_files) * 25)
                 progress_queue.put(json.dumps({"event": "progress", "step": "parse", "message": f"Parsing: {filename}", "percent": file_percent}))
                 
-                if ext == ".pdf":
-                    all_raw_chunks.extend(pipeline.parse_pdf(file_path))
-                elif ext in [".pptx", ".ppt"]:
-                    all_raw_chunks.extend(pipeline.parse_ppt(file_path))
-                elif ext == ".vtt":
-                    vtt_bases.add(filename.split(".")[0])
-                    all_raw_chunks.extend(pipeline.parse_vtt(file_path))
+                try:
+                    if ext == ".pdf":
+                        all_raw_chunks.extend(pipeline.parse_pdf(file_path))
+                    elif ext in [".pptx", ".ppt"]:
+                        all_raw_chunks.extend(pipeline.parse_ppt(file_path))
+                    elif ext == ".vtt":
+                        vtt_bases.add(filename.split(".")[0])
+                        all_raw_chunks.extend(pipeline.parse_vtt(file_path))
+                except Exception as parse_err:
+                    progress_queue.put(json.dumps({"event": "warning", "message": f"Skipped '{filename}': {parse_err}"}))
             
             if not all_raw_chunks:
                 progress_queue.put(json.dumps({"event": "error", "message": "No text content extracted from files."}))

@@ -380,27 +380,30 @@ class DocumentIngestionPipeline:
             file_path = os.path.join(DATA_DIR, filename)
             ext = os.path.splitext(filename)[1].lower()
             
-            if ext == ".pdf":
-                all_raw_chunks.extend(self.parse_pdf(file_path))
-            elif ext in [".ppt", ".pptx"]:
-                all_raw_chunks.extend(self.parse_ppt(file_path))
-            elif ext == ".vtt":
-                # Parse VTT subtitle files directly (instant, free, accurate)
-                all_raw_chunks.extend(self.parse_vtt(file_path))
-            elif ext in [".mp4", ".avi", ".mkv", ".mov", ".m4a", ".mp3", ".wav"]:
-                # De-duplicate: skip media files if a VTT subtitle exists for this recording
-                base = filename.split(".")[0]
-                # Also strip common suffixes like "_2880x1800" or "_gallery_2880x1800"
-                stripped_base = re.sub(r'(_gallery)?_\d+x\d+$', '', base)
-                if base in vtt_bases or stripped_base in vtt_bases:
-                    print(f"Skipping '{filename}' (VTT subtitle already provides this transcript)")
-                    continue
-                # No VTT available — fall back to Gemini-based video transcription
-                all_raw_chunks.extend(self.parse_video(file_path))
-            elif ext == ".png":
-                continue  # Silently skip image files
-            else:
-                print(f"Ignoring unsupported file type: {filename}")
+            try:
+                if ext == ".pdf":
+                    all_raw_chunks.extend(self.parse_pdf(file_path))
+                elif ext in [".ppt", ".pptx"]:
+                    all_raw_chunks.extend(self.parse_ppt(file_path))
+                elif ext == ".vtt":
+                    # Parse VTT subtitle files directly (instant, free, accurate)
+                    all_raw_chunks.extend(self.parse_vtt(file_path))
+                elif ext in [".mp4", ".avi", ".mkv", ".mov", ".m4a", ".mp3", ".wav"]:
+                    # De-duplicate: skip media files if a VTT subtitle exists for this recording
+                    base = filename.split(".")[0]
+                    # Also strip common suffixes like "_2880x1800" or "_gallery_2880x1800"
+                    stripped_base = re.sub(r'(_gallery)?_\d+x\d+$', '', base)
+                    if base in vtt_bases or stripped_base in vtt_bases:
+                        print(f"Skipping '{filename}' (VTT subtitle already provides this transcript)")
+                        continue
+                    # No VTT available — fall back to Gemini-based video transcription
+                    all_raw_chunks.extend(self.parse_video(file_path))
+                elif ext == ".png":
+                    continue  # Silently skip image files
+                else:
+                    print(f"Ignoring unsupported file type: {filename}")
+            except Exception as parse_err:
+                print(f"[WARNING] Failed to parse file '{filename}': {parse_err}. Skipping...")
 
         if not all_raw_chunks:
             print("No valid files processed or data folder is empty.")
