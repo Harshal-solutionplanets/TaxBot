@@ -320,7 +320,8 @@ class DocumentIngestionPipeline:
 
     def get_dense_embedding(self, text):
         """Generates dense vector embeddings using Gemini or local Ollama."""
-        if LLM_PROVIDER == "ollama":
+        embed_provider = os.getenv("EMBEDDING_PROVIDER", "ollama")
+        if embed_provider == "ollama":
             try:
                 res = requests.post(f"{OLLAMA_BASE_URL}/api/embeddings", json={
                     "model": OLLAMA_EMBED_MODEL,
@@ -455,7 +456,8 @@ class DocumentIngestionPipeline:
             
             try:
                 # 1. Dense Embeddings
-                if LLM_PROVIDER == "gemini":
+                embed_provider = os.getenv("EMBEDDING_PROVIDER", "ollama")
+                if embed_provider == "gemini":
                     if not GEMINI_API_KEY:
                         raise ValueError("Gemini API key is not configured.")
                     res = genai.embed_content(

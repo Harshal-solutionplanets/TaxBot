@@ -109,7 +109,8 @@ if os.path.exists(BM25_MODEL_PATH):
 
 # Helper: Dense Embedding
 def get_dense_embedding(text: str) -> list[float]:
-    if LLM_PROVIDER == "gemini":
+    embed_provider = os.getenv("EMBEDDING_PROVIDER", "ollama")
+    if embed_provider == "gemini":
         if not GEMINI_API_KEY:
             print("[ERROR] Gemini API Key missing for query embedding.")
             return []
