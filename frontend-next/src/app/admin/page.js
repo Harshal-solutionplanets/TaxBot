@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 
-const API_URL = 'http://127.0.0.1:8000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 
 export default function AdminPanel() {
   const [files, setFiles] = useState([]);
@@ -491,7 +491,8 @@ export default function AdminPanel() {
                   <th style={{ padding: '10px 8px', color: 'var(--text-secondary)', fontWeight: '500', fontSize: '0.85rem' }}>File Name</th>
                   <th style={{ padding: '10px 8px', color: 'var(--text-secondary)', fontWeight: '500', fontSize: '0.85rem' }}>Type</th>
                   <th style={{ padding: '10px 8px', color: 'var(--text-secondary)', fontWeight: '500', fontSize: '0.85rem' }}>Size</th>
-                  <th style={{ padding: '10px 8px', color: 'var(--text-secondary)', fontWeight: '500', fontSize: '0.85rem' }}>Uploaded</th>
+                  <th style={{ padding: '10px 8px', color: 'var(--text-secondary)', fontWeight: '500', fontSize: '0.85rem' }}>Chunks</th>
+                  <th style={{ padding: '10px 8px', color: 'var(--text-secondary)', fontWeight: '500', fontSize: '0.85rem' }}>Ingested At</th>
                   <th style={{ padding: '10px 8px', color: 'var(--text-secondary)', fontWeight: '500', fontSize: '0.85rem' }}>Actions</th>
                 </tr>
               </thead>
@@ -506,15 +507,23 @@ export default function AdminPanel() {
                         borderRadius: '4px',
                         fontSize: '0.75rem',
                         fontWeight: '600',
-                        backgroundColor: file.type === 'PDF' ? '#dbeafe' : file.type === 'VTT' ? '#d1fae5' : '#fef3c7',
-                        color: file.type === 'PDF' ? '#1e40af' : file.type === 'VTT' ? '#065f46' : '#92400e'
+                        backgroundColor: (file.file_type || file.type) === 'PDF' ? '#dbeafe' : (file.file_type || file.type) === 'VTT' ? '#d1fae5' : '#fef3c7',
+                        color: (file.file_type || file.type) === 'PDF' ? '#1e40af' : (file.file_type || file.type) === 'VTT' ? '#065f46' : '#92400e'
                       }}>
-                        {file.type}
+                        {file.file_type || file.type}
                       </span>
                     </td>
                     <td style={{ padding: '12px 8px', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{file.size_mb} MB</td>
+                    <td style={{ padding: '12px 8px', fontSize: '0.85rem', textAlign: 'center' }}>
+                      <span style={{
+                        display: 'inline-block', padding: '2px 10px', borderRadius: '12px',
+                        backgroundColor: '#e0e7ff', color: '#3730a3', fontWeight: '600', fontSize: '0.8rem'
+                      }}>
+                        {file.chunk_count ?? '—'}
+                      </span>
+                    </td>
                     <td style={{ padding: '12px 8px', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                      {new Date(file.uploaded_at).toLocaleString()}
+                      {file.ingested_at ? new Date(file.ingested_at).toLocaleString() : (file.uploaded_at ? new Date(file.uploaded_at).toLocaleString() : '—')}
                     </td>
                     <td style={{ padding: '12px 8px' }}>
                       <button

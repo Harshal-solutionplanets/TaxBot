@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 
 const API_URL = 'http://127.0.0.1:8000';
 
-export default function ChatArea({ activeSessionId, setActiveSessionId }) {
+export default function ChatArea({ activeSessionId, setActiveSessionId, isDrawerOpen, setIsDrawerOpen, theme, toggleTheme }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -209,16 +209,31 @@ export default function ChatArea({ activeSessionId, setActiveSessionId }) {
   return (
     <div className="chat-area">
       <div className="chat-header">
-        <div style={{ display: 'flex', justifyContent: 'between', alignItems: 'center', width: '100%' }}>
-          <div style={{ flex: 1 }}>
-            <h2>⚖️ Income Tax Act - Assistant</h2>
-            <p>AI-powered verification engine for Chartered Accountants. All answers are strictly grounded in active updates.</p>
+        <div className="chat-header-content">
+          <button 
+            className="hamburger-btn" 
+            onClick={() => setIsDrawerOpen(true)}
+            aria-label="Open Menu"
+          >
+            ☰
+          </button>
+          
+          <div className="chat-title-container">
+            <h2 className="desktop-title">⚖️ Income Tax Act - Assistant</h2>
+            <h2 className="mobile-title">TaxBot</h2>
+            <p className="desktop-subtitle">AI-powered verification engine for Chartered Accountants. All answers are strictly grounded in active updates.</p>
           </div>
-          {messages.length > 0 && (
-            <button className="theme-toggle" onClick={exportToMarkdown} style={{ marginLeft: '10px' }}>
-              📤 Export Markdown
+          
+          <div className="chat-header-actions">
+            <button onClick={toggleTheme} className="theme-toggle mobile-theme-toggle" aria-label="Toggle Theme">
+              {theme === 'light' ? '🌙' : '☀️'}
             </button>
-          )}
+            {messages.length > 0 && (
+              <button className="export-btn" onClick={exportToMarkdown}>
+                📤 <span className="hide-on-mobile">Export Markdown</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -328,8 +343,8 @@ export default function ChatArea({ activeSessionId, setActiveSessionId }) {
             placeholder="Ask about recent Income Tax Act changes..."
             disabled={isLoading}
           />
-          <button type="submit" disabled={!input.trim() || isLoading}>
-            Send
+          <button type="submit" className="send-btn" disabled={!input.trim() || isLoading} aria-label="Send">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
           </button>
         </form>
       </div>
